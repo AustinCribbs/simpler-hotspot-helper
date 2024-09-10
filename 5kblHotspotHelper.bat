@@ -1,131 +1,63 @@
 @echo off
-
-%1 mshta vbscript:CreateObject("Shell.Application").ShellExecute("cmd.exe","/c %~s0 ::","","runas",1)(window.close)&&exit
 cd /d "%~dp0"
+
+:: Check for admin rights
+openfiles >nul 2>&1 || (
+    powershell -Command "Start-Process cmd.exe -ArgumentList '/c %~s0' -Verb RunAs"
+    exit
+)
 
 :setup
 setlocal enableDelayedExpansion
 color 70
 
-
-IF NOT EXIST %appdata%\5kblHotspotFix (
-	mkdir %appdata%\5kblHotspotFix
-	echo.
+:: Create directory for storing the hotspot script if not present
+IF NOT EXIST "%appdata%\5kblHotspotFix" (
+    mkdir "%appdata%\5kblHotspotFix"
+    echo.
 )
 
-cd %appdata%\5kblHotspotFix
+cd /d "%appdata%\5kblHotspotFix"
 
-IF not EXIST "hotspotstart.ps1" (
+:: Create the PowerShell script to start the hotspot if it doesn't exist
+IF NOT EXIST "hotspotstart.ps1" (
     (
         ECHO $connectionProfile = [Windows.Networking.Connectivity.NetworkInformation,Windows.Networking.Connectivity,ContentType=WindowsRuntime]::GetInternetConnectionProfile(^)
-        ECHO.
         ECHO $tetheringManager = [Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager,Windows.Networking.NetworkOperators,ContentType=WindowsRuntime]::CreateFromConnectionProfile($connectionProfile^)
-        ECHO.
         ECHO $tetheringManager.StartTetheringAsync(^)
-    )>hotspotstart.ps1
-
-	echo.
-	echo The 
+    ) > hotspotstart.ps1
 )
 
+:: Create the PowerShell script to stop the hotspot if it doesn't exist
+IF NOT EXIST "hotspotstop.ps1" (
+    (
+        ECHO $connectionProfile = [Windows.Networking.Connectivity.NetworkInformation,Windows.Networking.Connectivity,ContentType=WindowsRuntime]::GetInternetConnectionProfile(^)
+        ECHO $tetheringManager = [Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager,Windows.Networking.NetworkOperators,ContentType=WindowsRuntime]::CreateFromConnectionProfile($connectionProfile^)
+        ECHO $tetheringManager.StopTetheringAsync(^)
+        ECHO.
+        ECHO $interface = Get-NetAdapter ^| Where-Object { $_.Status -eq "Up" -and $_.NdisPhysicalMedium -eq "802.11" }
+        ECHO Start-Process -NoNewWindow -FilePath "netsh" -ArgumentList "wlan set autoconfig enabled=yes interface=$($interface.Name)"
+    ) > hotspotstop.ps1
+)
 
+:: Default to Wi-Fi as the interface
 IF NOT EXIST ".\interface.txt" (
-	echo.
-	echo                                      ---WIRELESS INTERFACE SETUP---
-	echo.
-
-	netsh interface show interface
-	set /P "interface=Please copy-paste your wifi interface's name from the last column: "
-	echo.
-	echo !interface!>.\interface.txt
-	pause
-	cls
+    echo Wi-Fi > .\interface.txt
 )
 
-:menu
+:: Read the Wi-Fi interface name
+set /p "interfacename=" < "interface.txt"
 
-set /p "interfacename="<"interface.txt"
-echo.
-echo                                      ---WINDOWS HOTSPOT FIX/SETUP---
-echo.
-
-echo Created by 5kbl.
-
-echo.
-echo Current Wireless Interface: %interfacename%
-echo.
-echo MENU:
-echo [1] Turn on hotspot with fix - [2] Restore AutoConfig - [3] Change Wireless Interface - [4] Exit - [5] Uninstall
-echo.
-
-
-set /p Input=Choose(1/2/3/4/5):
-
-If /I "%Input%"=="1" goto 1
-If /I "%Input%"=="2" goto 2
-If /I "%Input%"=="3" goto 3
-If /I "%Input%"=="4" goto 4
-If /I "%Input%"=="5" goto 5
-goto other
-
-:1
-powershell .\hotspotstart.ps1
+:: Automatically start hotspot when script is launched
+powershell -ExecutionPolicy Bypass -File .\hotspotstart.ps1
 
 netsh wlan disconnect
-
 timeout 2
-
 netsh wlan set autoconfig enabled=no interface="%interfacename%"
-pause
-cls
-goto menu
 
-:2
-netsh wlan set autoconfig enabled=yes interface="%interfacename%"
+:: Wait until the batch file is closed to stop the hotspot
 pause
-cls
-goto menu
-
-:3
-cls
-echo.
-echo                                      ---WIRELESS INTERFACE SETUP---
-echo.
-echo Current interface: %interfacename%
-echo.
-netsh interface show interface
-set /P "interface=Please copy-paste your wifi interface's name from the last column:"
-echo.
-echo !interface!>.\interface.txt
-pause
-cls
-goto menu
-
-:4
+netsh wlan set autoconfig enabled=yes interface="Wi-Fi"
+:: Stop the hotspot and restore settings when the batch file is closed
+powershell -ExecutionPolicy Bypass -File .\hotspotstop.ps1
 exit
-
-:5
-set /p uninstallchoice=Are you sure?(y/n):
-
-If /I "%uninstallchoice%"=="y" goto y
-goto n
-
-:y
-cls
-cd %appdata%
-rmdir /s /q "%appdata%\5kblHotspotFix"
-echo Thanks for using 5kbl's Windows Hotspot Fix. Delete this script, and that's it. If you want to reinstall, simply run the script again.
-pause
-exit
-
-:n
-cls
-goto menu
-
-:other
-echo.
-echo Sorry, that's not an option!
-echo.
-pause
-cls
-goto menu
